@@ -1,0 +1,4 @@
+tushare>=1.4.0
+pandas>=2.0
+numpy>=1.24
+six  # tushare 1.4.x 的 trader 模块会 import six

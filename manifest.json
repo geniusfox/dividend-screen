@@ -1,0 +1,15 @@
+{
+  "name": "dividend-screen",
+  "version": "1.0.0",
+  "description": "高股息策略 v10：Tushare 全市场筛选、股息率/PB/负债率六道关、锚定价与次日最低价预测",
+  "entry": "SKILL.md",
+  "scriptsDir": "scripts",
+  "reference": "references/",
+  "capabilities": [
+    "stock-screening",
+    "tushare",
+    "dividend-yield",
+    "csv-export",
+    "markdown-summary"
+  ]
+}
