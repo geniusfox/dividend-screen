@@ -15,7 +15,7 @@ set -euo pipefail
 SKILL_NAME="dividend-screen"
 SKILL_DIR="${DSH_SKILLS_DIR:-$HOME/.agents/skills}/$SKILL_NAME"
 DATA_HOME="${DIVIDEND_SCREEN_HOME:-$HOME/.local/share/dividend-screen}"
-PKG_URL="${DIVIDEND_SCREEN_PKG_URL:-}"
+PKG_URL="${DIVIDEND_SCREEN_PKG_URL:-https://github.com/geniusfox/dividend-screen/archive/refs/heads/main.tar.gz}"
 TOKEN=""
 API_URL=""
 BACKUP=""
