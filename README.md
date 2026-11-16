@@ -7,18 +7,22 @@
 
 需要：macOS/Linux、Python 3.9+、网络、Tushare token（官方 2000+ 积分，或自建网关）。
 
-```bash
-# 本地（解压后进入目录）
-bash install.sh
-
-# 远程（把 tar.gz 放到任意可访问地址）
-bash install.sh --pkg-url https://example.com/dividend-screen-skill.tar.gz
-```
-
-也可以直接从 GitHub 一条命令安装：
+推荐：一条命令安装。
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/geniusfox/dividend-screen/main/install.sh)
+```
+
+离线/本地安装（解压后进入目录）：
+
+```bash
+bash install.sh
+```
+
+指定安装包地址（镜像、Release 或 fork）：
+
+```bash
+bash install.sh --pkg-url https://example.com/dividend-screen-skill.tar.gz
 ```
 
 安装器会：
