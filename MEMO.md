@@ -23,6 +23,7 @@
 | 数据/缓存 | `~/.local/share/dividend-screen/data/` |
 | 配置（token） | `~/.local/share/dividend-screen/config.json`（600，勿提交） |
 | 结果 CSV | `data/YYYYMMDD_dividend_screen.csv` |
+| 底部预测 CSV | `data/YYYYMMDD_forecast_price.csv` |
 | 汇总 MD | `data/YYYYMMDD_summary.md` |
 | 运行日志 | `data/run_YYYYMMDD_HHMMSS.log` |
 | 仓库 | https://github.com/geniusfox/dividend-screen |
@@ -113,3 +114,35 @@ bash <(curl -fsSL https://raw.githubusercontent.com/geniusfox/dividend-screen/ma
 ```
 
 按提示粘贴自己的 Tushare token；装完**新开一个 DSH session**，再用第 0 节那句话。
+
+## 8. 股票底部预测（同一 skill 的第二功能）
+
+一句话给新 session：
+
+```text
+用底部预测算一下这批股票的买点：
+1) 先 scripts/bottom.sh --codes 600795,002060 -v 跑两只确认接口通；
+2) 通了我再跑全量 scripts/bottom.sh --background，日志路径给我；
+3) 跑完把弱势信号（signal_strength=weak）的股票和 CSV 路径给我。
+不要向我要 token（已在 config.json）。
+```
+
+常用命令：
+
+```bash
+~/.agents/skills/dividend-screen/scripts/bottom.sh                    # 全量
+~/.agents/skills/dividend-screen/scripts/bottom.sh --background       # 后台
+~/.agents/skills/dividend-screen/scripts/bottom.sh --codes 600795,002060 -v
+~/.agents/skills/dividend-screen/scripts/bottom.sh --date 2026-11-19 --limit 50
+~/.agents/skills/dividend-screen/scripts/bottom.sh --refresh          # 忽略缓存
+```
+
+要点：
+
+- 输出 `data/YYYYMMDD_forecast_price.csv`，19 列；`la`=支撑中枢、`lx`=支撑下沿、
+  `ha`=压力中枢；`signal_strength=weak` 是风险提示，不是买卖建议。
+- 稳定态每天约 **25 次** API 调用（1 次日线 + 1 次 ETF 批量 + 23 批分钟线）；
+  同日重跑 **0 次**（约 1 秒）；隔日只补新交易日。
+- 分钟线按 30 只/批（网关 8000 行上限）；全量首跑受限流影响要几分钟。
+- 股票池在 `assets/equity_list.txt`（668 只，改这里即可增减）。
+- 口径/限制/排错：`references/BOTTOM_FORECAST.md`。

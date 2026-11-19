@@ -84,14 +84,16 @@ mkdir -p "$SKILL_DIR" "$DATA_HOME/data" "$DATA_HOME/bin"
 if [ "$SRC_DIR" = "$SKILL_DIR" ]; then
   echo "检测到源码与安装目录相同，跳过复制。"
 else
-for item in SKILL.md MEMO.md manifest.json requirements.txt scripts references install.sh README.md; do
+for item in SKILL.md MEMO.md manifest.json requirements.txt scripts references assets install.sh README.md; do
   if [ -e "$SRC_DIR/$item" ]; then
     rm -rf "$SKILL_DIR/$item"
     cp -R "$SRC_DIR/$item" "$SKILL_DIR/$item"
   fi
 done
 fi
-chmod +x "$SKILL_DIR/scripts/run.sh" "$SKILL_DIR/scripts/report.sh" "$SKILL_DIR/install.sh" 2>/dev/null || true
+chmod 755 "$SKILL_DIR/scripts/run.sh" "$SKILL_DIR/scripts/report.sh" \
+          "$SKILL_DIR/scripts/bottom.sh" "$SKILL_DIR/scripts/bottom_forecast_tushare.py" \
+          "$SKILL_DIR/install.sh" 2>/dev/null || true
 printf 'DIVIDEND_SCREEN_HOME=%s\n' "$DATA_HOME" > "$SKILL_DIR/runtime.env"
 
 # ---------- 虚拟环境 ----------
@@ -170,7 +172,12 @@ cat >"$DATA_HOME/bin/dividend-screen-report" <<EOF
 #!/usr/bin/env bash
 exec "$SKILL_DIR/scripts/report.sh" "\$@"
 EOF
-chmod +x "$DATA_HOME/bin/dividend-screen" "$DATA_HOME/bin/dividend-screen-report"
+cat >"$DATA_HOME/bin/dividend-screen-bottom" <<EOF
+#!/usr/bin/env bash
+exec "$SKILL_DIR/scripts/bottom.sh" "\$@"
+EOF
+chmod +x "$DATA_HOME/bin/dividend-screen" "$DATA_HOME/bin/dividend-screen-report" \
+         "$DATA_HOME/bin/dividend-screen-bottom"
 
 # ---------- 自检 ----------
 if [ "$SKIP_CHECK" -eq 0 ]; then
@@ -193,11 +200,16 @@ cat <<EOF
 
 在 DSH 里说一句：
   用高股息策略帮我筛选一下 A 股
+  或：用底部预测算一下这些股票的买点
 
-或命令行先用小样本验证：
+命令行小样本验证：
   $DATA_HOME/bin/dividend-screen --limit 30 --skip-minute
-然后后台全量：
-  $SKILL_DIR/scripts/run.sh --background
-出报告：
+  $DATA_HOME/bin/dividend-screen-bottom --codes 600795,002060 -v
+
+后台全量：
+  $SKILL_DIR/scripts/run.sh --background        # 高股息选股
+  $SKILL_DIR/scripts/bottom.sh --background     # 股票底部预测
+
+出报告（仅高股息选股）：
   $SKILL_DIR/scripts/report.sh
 EOF
