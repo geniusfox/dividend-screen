@@ -84,7 +84,7 @@ mkdir -p "$SKILL_DIR" "$DATA_HOME/data" "$DATA_HOME/bin"
 if [ "$SRC_DIR" = "$SKILL_DIR" ]; then
   echo "检测到源码与安装目录相同，跳过复制。"
 else
-for item in SKILL.md manifest.json requirements.txt scripts references install.sh README.md; do
+for item in SKILL.md MEMO.md manifest.json requirements.txt scripts references install.sh README.md; do
   if [ -e "$SRC_DIR/$item" ]; then
     rm -rf "$SKILL_DIR/$item"
     cp -R "$SRC_DIR/$item" "$SKILL_DIR/$item"

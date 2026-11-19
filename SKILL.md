@@ -81,6 +81,7 @@ description: 当用户想用高股息/红利策略筛选 A 股、跑"高股息�
 
 ## 更多
 
+- 调用速查（可直接粘给新 session）：`MEMO.md`
 - 运行/汇报细节：`references/WORKFLOW.md`
 - 报错处理：`references/TROUBLESHOOTING.md`
 - 策略口径与接口限制：`references/STRATEGY.md`

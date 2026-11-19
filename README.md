@@ -35,6 +35,10 @@ bash install.sh --pkg-url https://example.com/dividend-screen-skill.tar.gz
 > 安装完成后**新开一个 DSH 会话**（或重启 DSH），让它重新扫描 `~/.agents/skills`，
 > 然后说“用高股息策略筛选一下 A 股”即可。
 
+## 调用备忘
+
+日常命令、增量缓存、排错速查：见 [MEMO.md](MEMO.md)。
+
 ## 使用
 
 装完后对 DSH 说：
