@@ -29,6 +29,7 @@ description: 当用户想用高股息/红利策略筛选 A 股、跑"高股息�
 ~/.agents/skills/dividend-screen/scripts/run.sh --background
 ```
 
+- 缓存是增量的：同日期重跑几乎 0 请求，隔日只补新交易日/新分钟线；分红、财务、PB 序列默认 7 天刷新，`--refresh` 强制全量。
 - 立即返回日志路径和 PID；
 - 用读取日志/等待后台任务的方式跟踪进度（每 100 只分红打印一次，最后输出统计摘要）；
 - 完成后生成结果文件：`~/.local/share/dividend-screen/data/YYYYMMDD_dividend_screen.csv`。

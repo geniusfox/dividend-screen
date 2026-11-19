@@ -153,10 +153,27 @@ class TushareClient:
         self.n_cache_hits = 0
 
     # ---------- 缓存 ----------
-    def _cache_path(self, api, params):
-        raw = json.dumps(params, sort_keys=True, ensure_ascii=False, default=str)
+    def _cache_path(self, api, params, cache_key=None):
+        if cache_key:
+            # 稳定 key：忽略随运行变化的日期参数，只保留 key 与 fields
+            raw = json.dumps({"key": str(cache_key), "fields": params.get("fields")},
+                             sort_keys=True, ensure_ascii=False, default=str)
+        else:
+            # 保持旧版按完整参数哈希，兼容已有缓存文件
+            raw = json.dumps(params, sort_keys=True, ensure_ascii=False, default=str)
         digest = hashlib.md5(raw.encode("utf-8")).hexdigest()[:16]
         return self.cache_dir / api / f"{digest}.pkl"
+
+    @staticmethod
+    def _fresh(path, ttl_days):
+        """缓存是否在有效期内；ttl_days=None 表示永久有效。"""
+        if ttl_days is None:
+            return True
+        try:
+            age_days = (time.time() - path.stat().st_mtime) / 86400.0
+        except OSError:
+            return True
+        return age_days <= float(ttl_days)
 
     def _read_cache(self, path):
         if not (self.use_cache and path.exists()):
@@ -209,15 +226,30 @@ class TushareClient:
         return getattr(self.pro, api)(**params)
 
     # ---------- 调用 ----------
-    def call(self, api, **params):
+    def call(self, api, cache_key=None, ttl_days=None, **params):
+        """调用 Tushare 接口。
+
+        - cache_key：稳定缓存 key，忽略日期等易变参数（用于财务/分红/PB 等历史数据）；
+        - ttl_days：缓存有效期（天），过期的历史数据会自动刷新；
+        - 不传 ttl_days 时缓存永久有效（适合按交易日/年度切分的不可变数据）。
+        """
         params = {k: v for k, v in params.items() if v is not None}
-        cache_path = self._cache_path(api, params)
+        cache_path = self._cache_path(api, params, cache_key)
 
         if self.use_cache and not self.refresh:
             cached = self._read_cache(cache_path)
-            if cached is not None:
+            if cached is not None and self._fresh(cache_path, ttl_days):
                 self.n_cache_hits += 1
                 return cached
+            # 兼容旧版按完整参数存储的缓存：同一份数据直接迁移到稳定 key
+            if cache_key:
+                legacy_path = self._cache_path(api, params)
+                if legacy_path != cache_path:
+                    legacy = self._read_cache(legacy_path)
+                    if legacy is not None and self._fresh(legacy_path, ttl_days):
+                        self._write_cache(cache_path, legacy)
+                        self.n_cache_hits += 1
+                        return legacy
 
         last_err = None
         df = None
@@ -293,22 +325,31 @@ def progress(i, total, label, every=50):
 # 交易日历 / 股票池 / 行业 / ST
 # ============================================================
 def get_trade_days(client, start_date, end_date) -> list[pd.Timestamp]:
+    start = pd.Timestamp(start_date)
+    end = pd.Timestamp(end_date)
+    # 一次拉到 end 所在自然年年末，年内 key 稳定，翻年才需要重新拉
+    fetch_end = max(end, pd.Timestamp(f"{end.year}-12-31"))
     df = client.call(
         "trade_cal",
         exchange="SSE",
-        start_date=ymd(start_date),
-        end_date=ymd(end_date),
+        start_date=ymd(start),
+        end_date=ymd(fetch_end),
         is_open="1",
+        ttl_days=30,
     )
     if _empty(df):
         raise RuntimeError("trade_cal 返回为空，请检查 token/网络。")
     days = pd.to_datetime(df["cal_date"].astype(str), format="%Y%m%d", errors="coerce")
-    return sorted(days.dropna().unique().tolist())
+    return sorted(d for d in days.dropna().unique().tolist() if start <= d <= end)
 
 
 def previous_trading_date(client, date_str):
-    start = (pd.Timestamp(date_str) - pd.Timedelta(days=30)).strftime("%Y-%m-%d")
-    days = [d for d in get_trade_days(client, start, date_str) if d < pd.Timestamp(date_str)]
+    target = pd.Timestamp(date_str)
+    days = [d for d in get_trade_days(client, f"{target.year}-01-01", f"{target.year}-12-31")
+            if d < target]
+    if not days:
+        days = [d for d in get_trade_days(client, f"{target.year - 1}-01-01",
+                                          f"{target.year - 1}-12-31") if d < target]
     if not days:
         raise SystemExit(f"{date_str} 之前没有交易日，请检查日期。")
     return days[-1]
@@ -332,6 +373,7 @@ def load_universe(client, date_str):
         exchange="",
         list_status="L",
         fields="ts_code,symbol,name,market,list_date,delist_date",
+        ttl_days=1,
     )
     if _empty(df):
         raise RuntimeError("stock_basic 返回为空。")
@@ -372,7 +414,7 @@ def load_universe(client, date_str):
 def load_industry_catalog(client):
     """申万一级行业目录（SW2021），返回 DataFrame[index_code, industry_name, level]。"""
     cls = client.call("index_classify", level="L1", src="SW2021",
-                      fields="index_code,industry_name,level")
+                      fields="index_code,industry_name,level", ttl_days=30)
     if _empty(cls):
         raise RuntimeError("index_classify 返回为空")
     cls = cls.copy()
@@ -394,7 +436,7 @@ def load_industry_members(client, cls, wanted_names):
         for kwargs in ({"index_code": code, "is_new": "Y", "fields": fields},
                        {"index_code": code, "fields": fields}):
             try:
-                mem = client.call("index_member", **kwargs)
+                mem = client.call("index_member", ttl_days=30, **kwargs)
                 break
             except Exception:  # noqa: BLE001
                 continue
@@ -456,7 +498,8 @@ def fetch_daily_by_dates(client, dates, codes):
     """按交易日批量取日线（不复权），只保留给定代码，返回长表。"""
     frames = []
     for d in dates:
-        df = client.call("daily", trade_date=ymd(d),
+        ttl = 0.5 if pd.Timestamp(d).normalize() >= pd.Timestamp.today().normalize() else None
+        df = client.call("daily", trade_date=ymd(d), ttl_days=ttl,
                          fields="ts_code,trade_date,open,high,low,close,vol")
         if _empty(df):
             continue
@@ -474,7 +517,8 @@ def fetch_daily_basic_by_dates(client, dates, fields="ts_code,trade_date,close,p
     """按交易日批量取每日指标，返回长表。"""
     frames = []
     for d in dates:
-        df = client.call("daily_basic", trade_date=ymd(d), fields=fields)
+        ttl = 0.5 if pd.Timestamp(d).normalize() >= pd.Timestamp.today().normalize() else None
+        df = client.call("daily_basic", trade_date=ymd(d), ttl_days=ttl, fields=fields)
         if _empty(df):
             continue
         df = df.copy()
@@ -499,7 +543,7 @@ def build_shares_history(db_year_end):
 
 def fetch_dividend_hist(client, code, start_year, end_year, asof_date):
     """{year: 每股税前现金分红(元)}，只含已实施且除权除息日 <= asof_date。"""
-    df = client.call("dividend", ts_code=code)
+    df = client.call("dividend", cache_key=f"div:{code}", ttl_days=7, ts_code=code)
     if _empty(df):
         return {}
     df = df.copy()
@@ -535,7 +579,8 @@ def fetch_financials(client, code, start_year, asof_date):
 
     try:
         fd = client.call(
-            "fina_indicator", ts_code=code, start_date=start, end_date=end,
+            "fina_indicator", cache_key=f"fina:{code}:{start_year}", ttl_days=7,
+            ts_code=code, start_date=start, end_date=end,
             fields="ts_code,ann_date,end_date,profit_dedt,debt_to_assets",
         )
     except Exception as e:  # noqa: BLE001
@@ -569,9 +614,11 @@ def fetch_financials(client, code, start_year, asof_date):
     cf_frames = []
     for y in range(start_year, asof.year):
         try:
+            # 最近一年的年报可能尚未披露：30 天后重试；更早年度基本不变，永久缓存
+            ttl = 30 if y >= asof.year - 1 else None
             dfy = client.call(
                 "cashflow", ts_code=code, start_date=f"{y}0101", end_date=f"{y}1231",
-                fields="ts_code,ann_date,end_date,n_cashflow_act",
+                fields="ts_code,ann_date,end_date,n_cashflow_act", ttl_days=ttl,
             )
             if not _empty(dfy):
                 cf_frames.append(dfy)
@@ -701,12 +748,17 @@ def calc_anchor_prices(current_price, div_hist, historical_avg_yield,
     return p_min, p_avg, round(est_dps, 4)
 
 
-def calc_pb_percentile(client, code, date_str, years=PB_HISTORY_YEARS):
-    """返回 (当前PB, 5年历史百分位)。"""
+def calc_pb_percentile(client, code, date_str, current_pb=None, years=PB_HISTORY_YEARS):
+    """返回 (当前PB, 5年历史百分位)。
+
+    历史序列用稳定 key 缓存（7 天刷新），当日 PB 直接用本次批量行情里的值追加，
+    避免每天重拉 5 年序列。
+    """
     start = (pd.Timestamp(date_str) - pd.DateOffset(years=years)).strftime("%Y%m%d")
     try:
         df = client.call(
-            "daily_basic", ts_code=code, start_date=start, end_date=ymd(date_str),
+            "daily_basic", cache_key=f"pb:{code}", ttl_days=7,
+            ts_code=code, start_date=start, end_date=ymd(date_str),
             fields="ts_code,trade_date,pb",
         )
     except Exception as e:  # noqa: BLE001
@@ -717,11 +769,17 @@ def calc_pb_percentile(client, code, date_str, years=PB_HISTORY_YEARS):
     df = df.copy()
     df["trade_date"] = pd.to_datetime(df["trade_date"].astype(str), format="%Y%m%d", errors="coerce")
     pb = pd.to_numeric(df.sort_values("trade_date")["pb"], errors="coerce").dropna()
-    if pb.empty:
+    values = [float(v) for v in pb.tolist()]
+    if current_pb is None or pd.isna(current_pb):
+        cur = values[-1] if values else None
+    else:
+        cur = float(current_pb)
+    if cur is None:
         return None, None
-    current_pb = float(pb.iloc[-1])
-    percentile = float((pb < current_pb).mean() * 100)
-    return round(current_pb, 2), round(percentile, 1)
+    if not values or abs(values[-1] - cur) > 1e-9:
+        values.append(cur)
+    percentile = float((np.asarray(values) < cur).mean() * 100)
+    return round(cur, 2), round(percentile, 1)
 
 
 def is_volume_surge(volume, avg_volume):
@@ -916,6 +974,13 @@ def run_screen(opts: ScreenOptions, client):
     df1 = df1[df1["price"].notna() & (df1["price"] > 0)].copy()
     print(f"有 {len(df1)} 只股票具有有效价格。")
 
+    # PB 上限与第6步同条件（AND 关系），提前到分红/财务之前，能省掉大量请求
+    before_pb = len(df1)
+    df1 = df1[df1["pb_ratio"].notna() & (df1["pb_ratio"] <= MAX_PB)].copy()
+    print(f"PB <= {MAX_PB} 预筛：{before_pb} -> {len(df1)} 只")
+    if len(df1) == 0:
+        raise SystemExit(f"PB <= {MAX_PB} 预筛后无股票。")
+
     # ── 第3步：批量预取分红数据 ──
     print(f"\n[第3步] 分红数据（逐只 dividend，共 {len(df1)} 只，带本地缓存）...")
     div_cache = {}
@@ -950,23 +1015,14 @@ def run_screen(opts: ScreenOptions, client):
 
     gate_rows = []
     price_map = dict(zip(df1["ts_code"], df1["price"]))
-    pb_map = dict(zip(df1["ts_code"], df1["pb_ratio"]))
     candidates = [
         (code, float(price_map[code]))
         for code in codes
         if sum(1 for v in div_cache.get(code, {}).values() if v > 0) >= MIN_CONTINUOUS_DIV_YEARS
     ]
     print(f"分红年数达标的股票 {len(candidates)} 只 ...")
-    # 提前应用 PB 上限（与第6步同条件，AND 关系，不改变最终结果，但能省掉大量财务请求）
-    before_pb = len(candidates)
-    candidates = [
-        (code, price) for code, price in candidates
-        if pd.notna(pb_map.get(code)) and float(pb_map[code]) <= MAX_PB
-    ]
-    if before_pb != len(candidates):
-        print(f"  PB <= {MAX_PB} 预筛：{before_pb} -> {len(candidates)} 只，继续检查财务数据 ...")
     if not candidates:
-        raise SystemExit(f"PB <= {MAX_PB} 预筛后无候选股票。")
+        raise SystemExit("分红年数达标股票为 0，请检查分红数据或放宽 MIN_CONTINUOUS_DIV_YEARS。")
     for i, (code, price) in enumerate(candidates):
         profit_hist, ocf_hist, debt_ratio = fetch_financials(
             client, code, start_year, date_str)
@@ -1016,8 +1072,9 @@ def run_screen(opts: ScreenOptions, client):
     # ── 第6步：PB 和百分位 ──
     print("\n[第6步] PB 与百分位 ...")
     pb_pct = {}
+    pb_now = dict(zip(df3["ts_code"], df3["pb_ratio"]))
     for code in df3["ts_code"].tolist():
-        pb_pct[code] = calc_pb_percentile(client, code, date_str)
+        pb_pct[code] = calc_pb_percentile(client, code, date_str, current_pb=pb_now.get(code))
     df3["pb_percentile"] = df3["ts_code"].map(
         lambda s: pb_pct.get(s, (None, None))[1])
 

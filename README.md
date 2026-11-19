@@ -49,7 +49,12 @@ bash install.sh --pkg-url https://example.com/dividend-screen-skill.tar.gz
 ~/.agents/skills/dividend-screen/scripts/report.sh
 ```
 
-默认取"今天的前一交易日"作为数据截止日；全量首次约 1~2 小时，之后有缓存会快很多。
+默认取"今天的前一交易日"作为数据截止日。缓存是增量的：
+
+- 首跑全量约 1~2 小时（约 3000 次请求）；
+- **同日期重跑接近 0 请求**；
+- 隔日重跑只补新交易日/分钟线，约 90 次请求；
+- 分红、财务、PB 序列默认 7 天刷新；要最新数据加 `--refresh`。
 
 ## 输出
 
