@@ -248,6 +248,12 @@ class TushareClient:
                     legacy = self._read_cache(legacy_path)
                     if legacy is not None and self._fresh(legacy_path, ttl_days):
                         self._write_cache(cache_path, legacy)
+                        # 保留旧文件的 mtime，避免旧数据被误判为"刚刷新"
+                        try:
+                            st = legacy_path.stat()
+                            os.utime(cache_path, (st.st_atime, st.st_mtime))
+                        except OSError:
+                            pass
                         self.n_cache_hits += 1
                         return legacy
 
@@ -1390,6 +1396,7 @@ def main(argv=None, client=None):
         if getattr(client, "pro_backup", None) is not None:
             print("备用通道：已启用（分红/财务/ST/行业目录等单只查询走加速通道）")
         if args.check:
+            client.refresh = True  # 自检必须走真实请求，避免缓存掩盖 token/权限问题
             ok, total = check_permissions(client, opts.date)
             return 0 if ok == total else 1
         run_screen(opts, client)
